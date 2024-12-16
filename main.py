@@ -1,6 +1,5 @@
 import pandas as pd
 import os
-import json
 
 def create_folder_structure(base_path, folder_path):
     """
@@ -10,16 +9,17 @@ def create_folder_structure(base_path, folder_path):
     os.makedirs(full_path, exist_ok=True)
     return full_path
 
-def save_json(data, file_path):
+def save_js(data, file_path):
     """
-    Saves a dictionary as a JSON file.
+    Saves a dictionary as a JavaScript file that exports the data.
     """
-    with open(file_path, 'w', encoding='utf-8') as json_file:
-        json.dump(data, json_file, ensure_ascii=False, indent=4)
+    js_content = f"export default {data};\n"
+    with open(file_path, 'w', encoding='utf-8') as js_file:
+        js_file.write(js_content)
 
 def sheet_to_child_files(sheet_name, data, folder_path):
     """
-    Creates two JSON files (English and Deutsch) for a given sheet and folder path.
+    Creates two JavaScript files (English and Deutsch) for a given sheet and folder path.
     """
     english_data = {}
     deutsch_data = {}
@@ -33,47 +33,69 @@ def sheet_to_child_files(sheet_name, data, folder_path):
         english_data[key] = english
         deutsch_data[key] = deutsch
 
-    # Save English and Deutsch JSON files
-    english_file_path = os.path.join(folder_path, f"{sheet_name}_english.json")
-    deutsch_file_path = os.path.join(folder_path, f"{sheet_name}_deutsch.json")
-    save_json(english_data, english_file_path)
-    save_json(deutsch_data, deutsch_file_path)
+    # Save English and Deutsch JS files
+    english_file_path = os.path.join(folder_path, f"{sheet_name}_english.js")
+    deutsch_file_path = os.path.join(folder_path, f"{sheet_name}_deutsch.js")
+    save_js(english_data, english_file_path)
+    save_js(deutsch_data, deutsch_file_path)
 
     return {
         "english": english_file_path,
         "deutsch": deutsch_file_path
     }
 
-def create_parent_json(folder_path, child_files):
+def create_parent_js(folder_path, child_files):
     """
-    Creates a parent JSON file that references its child files.
+    Creates a parent JS file that imports and exports its child files.
     """
-    parent_data = {}
+    parent_js_path = os.path.join(folder_path, "parent.js")
+
+    # Generate import statements and prepare the export object
+    imports = []
+    export_object = []
+
     for language, file_path in child_files.items():
-        # Store relative paths to child files
-        parent_data[language] = os.path.relpath(file_path, folder_path)
+        variable_name = f"{language}_data"
+        relative_path = os.path.relpath(file_path, folder_path).replace("\\", "/")
+        imports.append(f"import {variable_name} from './{os.path.basename(relative_path)}';")
+        export_object.append(f"{language}: {variable_name}")
 
-    parent_file_path = os.path.join(folder_path, "parent.json")
-    save_json(parent_data, parent_file_path)
-    return parent_file_path
+    # Write the final content to the file
+    with open(parent_js_path, 'w', encoding='utf-8') as js_file:
+        js_file.write("\n".join(imports) + "\n\n")
+        js_file.write(f"export default {{\n    {',\n    '.join(export_object)}\n}};\n")
 
-def create_root_json(output_base, parent_files, language):
+    return parent_js_path
+
+
+
+
+def create_root_js(output_base, parent_files, language):
     """
-    Creates a root JSON file for a specific language that imports all parent files.
+    Creates a root JS file for a specific language that imports and exports all parent files.
     """
-    root_data = {}
+    root_js_path = os.path.join(output_base, f"{language}.js")
+
+    # Generate import and export statements
+    imports = []
+    export_entries = []
     for sheet_name, parent_file in parent_files.items():
-        # Get the relative path to the parent file
-        relative_path = os.path.relpath(parent_file, output_base)
-        root_data[sheet_name] = os.path.join(relative_path, f"{language}.json")
+        variable_name = f"{sheet_name}_data"
+        relative_path = os.path.relpath(parent_file, output_base).replace("\\", "/")
+        imports.append(f"import {variable_name} from './{relative_path}';")
+        export_entries.append(f"{sheet_name}: {variable_name}.{language}")
 
-    root_file_path = os.path.join(output_base, f"{language}.json")
-    save_json(root_data, root_file_path)
-    print(f"{language.capitalize()} root file created: {root_file_path}")
+    # Write imports and exports to the root file
+    with open(root_js_path, 'w', encoding='utf-8') as js_file:
+        js_file.write("\n".join(imports) + "\n\n")
+        js_file.write(f"export default {{\n    {',\n    '.join(export_entries)}\n}};\n")
 
-def excel_to_json_folder(excel_path, output_base, tree_structure):
+    print(f"{language.capitalize()} root file created: {root_js_path}")
+
+
+def excel_to_js_folder(excel_path, output_base, tree_structure):
     """
-    Reads an Excel file, processes each sheet, and saves data as a tree structure.
+    Reads an Excel file, processes each sheet, and saves data as a JavaScript structure.
     """
     # Read all sheets
     sheets = pd.read_excel(excel_path, sheet_name=None)
@@ -94,12 +116,12 @@ def excel_to_json_folder(excel_path, output_base, tree_structure):
         child_files = sheet_to_child_files(sheet_name, data, full_path)
 
         # Create a parent file that references child files
-        parent_file_path = create_parent_json(full_path, child_files)
-        parent_files[sheet_name] = parent_file_path
+        parent_js_path = create_parent_js(full_path, child_files)
+        parent_files[sheet_name] = parent_js_path
 
     # Create separate root files for each language
     for language in ["english", "deutsch"]:
-        create_root_json(output_base, parent_files, language)
+        create_root_js(output_base, parent_files, language)
 
 # Example Tree Structure Mapping
 tree_structure = {
@@ -112,4 +134,4 @@ tree_structure = {
 # Example usage
 excel_file_path = "translation.xlsx"
 output_folder = "./output"
-excel_to_json_folder(excel_file_path, output_folder, tree_structure)
+excel_to_js_folder(excel_file_path, output_folder, tree_structure)
